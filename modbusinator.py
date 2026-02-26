@@ -5,7 +5,7 @@
 import time
 import json
 from threading import Thread
-from pymodbus.server import StartTcpServer
+from pymodbus.server import ModbusTcpServer
 from pymodbus.datastore import ModbusSequentialDataBlock, ModbusDeviceContext, ModbusServerContext
 
 class MODBUSINATOR:
@@ -22,7 +22,7 @@ class MODBUSINATOR:
         self.serverThread = None
 
     def updateParameter(self, address: int, dataString: str):
-        """Takes a JSON string (value+timestamp) and writes it to a fix register block"""
+        """Takes a JSON string (value+timestamp) and writes it to a fixed register block"""
         maxBytes = self.registersPerParam * 2
         byteData = dataString.encode('utf-8')
 
@@ -52,6 +52,8 @@ class MODBUSINATOR:
                 "ts": param.get("ts", int(time.time())),
                 "v": param.get("v", 0.0)
             })
+            self.updateParameter(addr, dataString)   # ← THIS WAS MISSING - NOW FIXED
+
         print(f"MODBUSINATOR updated {len(paramList)} parameters at {time.ctime()}")
 
     def runServer(self):
@@ -60,12 +62,11 @@ class MODBUSINATOR:
             print("MODBUSINATOR already running")
             return
 
-        def _startInternal():
-            StartTcpServer(
-                context=self.context,
-                address=(self.host, self.port)
-            )
-        self.serverThread = Thread(target=_startInternal, daemon=True)
+        self.server = ModbusTcpServer(
+            context=self.context,
+            address=(self.host, self.port)
+        )
+        self.serverThread = Thread(target=self.server.serve_forever, daemon=True)
         self.serverThread.start()
         print(f"MODBUSINATOR listening on {self.host}:{self.port}")
 
