@@ -1,21 +1,15 @@
 # ==============================================
-#  MODBUSINATOR v1.3 - SIMPLE FLOAT VALUES (TCP + SERIAL RTU SIMULTANEOUS)
+#  MODBUSINATOR v1.6 - XLINK 500 READY (wordSwap=True)
 # ==============================================
 #
-# PURPOSE: Super-simple Modbus slave. Each parameter = one clean float value.
-#          TCP always runs. Serial runs additionally if comPort is given.
-#          Works with XLink 500, any SCADA, PLC, test tools, etc.
+# For XLink 500:
+#   Use wordSwap=True
+#   Reg Number = (Param - 1) * 2 + 1
+#   MSW = Low Reg
+#   Example: Param 1 → Reg 1
+#            Param 100 → Reg 199
 #
-# INPUT FORMAT for .update(inputString):
-#   JSON string — single value or list of values.
-#   Examples:
-#       '25.34'                                 ← single parameter
-#       '[25.34, 26.1, 27.0]'                   ← 3 parameters
-#       '[{"v":25.34}, {"v":26.1}, {"v":27.0}]' ← also works
-#       '{"v":25.34}'                           ← single dict also works
-#
-#   Extra values beyond numParams are ignored.
-#   Default: 256 parameters (each uses 2 registers).
+# All other devices usually work with wordSwap=False (default)
 
 import time
 import json
@@ -26,7 +20,8 @@ from pymodbus import FramerType
 from pymodbus.datastore import ModbusSequentialDataBlock, ModbusDeviceContext, ModbusServerContext
 
 class MODBUSINATOR:
-    def __init__(self, numParams=256, registersPerParam=2, port=502, host="0.0.0.0", comPort=None, baudRate=9600):
+    def __init__(self, numParams=256, registersPerParam=2, port=502, host="0.0.0.0", 
+                 comPort=None, baudRate=19200, wordSwap=False):
         self.numParams = numParams
         self.registersPerParam = registersPerParam
         self.totalRegisters = registersPerParam * numParams + 100
@@ -34,16 +29,25 @@ class MODBUSINATOR:
         self.host = host
         self.comPort = comPort
         self.baudRate = baudRate
+        self.wordSwap = wordSwap
         self.datablock = ModbusSequentialDataBlock(0, [0] * self.totalRegisters)
         self.deviceContext = ModbusDeviceContext(hr=self.datablock)
         self.context = ModbusServerContext(devices=self.deviceContext, single=True)
-        self.threads = [] # holds TCP + optional serial threads
+        self.threads = []
 
     def writeFloat(self, address: int, value: float):
-        """Writes value as IEEE 754 float (2 registers)"""
-        floatBytes = struct.pack('>f', float(value))
-        reg1 = int.from_bytes(floatBytes[0:2], 'big')
-        reg2 = int.from_bytes(floatBytes[2:4], 'big')
+        """IEEE 754 float - supports wordSwap for XLink 500"""
+        floatBytes = struct.pack('>f', float(value))   # always big-endian first
+        
+        if self.wordSwap:
+            # XLink wants low word first
+            reg1 = int.from_bytes(floatBytes[2:4], 'big')   # LSW
+            reg2 = int.from_bytes(floatBytes[0:2], 'big')   # MSW
+        else:
+            # Normal order
+            reg1 = int.from_bytes(floatBytes[0:2], 'big')   # MSW
+            reg2 = int.from_bytes(floatBytes[2:4], 'big')   # LSW
+            
         self.deviceContext.setValues(3, address, [reg1, reg2])
 
     def update(self, inputString: str):
@@ -71,31 +75,29 @@ class MODBUSINATOR:
             return
         self.threads = []
 
-        # === TCP SERVER (always runs) ===
-        def _tcpInternal():
+        def _tcp():
             StartTcpServer(context=self.context, address=(self.host, self.port))
-        tcpThread = Thread(target=_tcpInternal, daemon=True)
-        tcpThread.start()
-        self.threads.append(tcpThread)
+        t1 = Thread(target=_tcp, daemon=True)
+        t1.start()
+        self.threads.append(t1)
         print(f"MODBUSINATOR TCP listening on {self.host}:{self.port}")
 
-        # === SERIAL SERVER (only if comPort given) ===
-        if self.comPort is not None:
-            def _serialInternal():
+        if self.comPort:
+            def _serial():
                 StartSerialServer(
                     context=self.context,
                     framer=FramerType.RTU,
                     port=self.comPort,
                     baudrate=self.baudRate,
                     bytesize=8,
-                    parity="N",
+                    parity="E",
                     stopbits=1
                 )
-            serialThread = Thread(target=_serialInternal, daemon=True)
-            serialThread.start()
-            self.threads.append(serialThread)
-            print(f"MODBUSINATOR SERIAL listening on {self.comPort} @ {self.baudRate} 8N1")
+            t2 = Thread(target=_serial, daemon=True)
+            t2.start()
+            self.threads.append(t2)
+            print(f"MODBUSINATOR SERIAL listening on {self.comPort} @ {self.baudRate} 8E1")
 
     def stop(self):
-        print("MODBUSINATOR stopped cleanly (daemon threads end automatically)")
+        print("MODBUSINATOR stopped cleanly")
         self.threads = []
