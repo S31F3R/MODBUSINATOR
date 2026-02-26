@@ -5,7 +5,7 @@
 import time
 import json
 from threading import Thread
-from pymodbus.server import ModbusTcpServer
+from pymodbus.server import StartTcpServer
 from pymodbus.datastore import ModbusSequentialDataBlock, ModbusDeviceContext, ModbusServerContext
 
 class MODBUSINATOR:
@@ -62,24 +62,19 @@ class MODBUSINATOR:
             print("MODBUSINATOR already running")
             return
 
-        self.server = ModbusTcpServer(
-            context=self.context,
-            address=(self.host, self.port)
-        )
-        self.serverThread = Thread(target=self.server.serve_forever, daemon=True)
+        def _startInternal():
+            StartTcpServer(
+                context=self.context,
+                address=(self.host, self.port)
+            )
+        self.serverThread = Thread(target=_startInternal, daemon=True)
         self.serverThread.start()
         print(f"MODBUSINATOR listening on {self.host}:{self.port}")
 
     def stop(self):
         """Cleanly stops the server"""
-        if self.server:
-            try:
-                self.server.shutdown()
-                print("MODBUSINATOR shutdown command sent")
-            except Exception as e:
-                print(f"Warning during shutdown: {e}")
-            self.server = None
+        if self.serverThread and self.serverThread.is_alive():
+            print("MODBUSINATOR shutdown command sent (daemon thread will end when program finishes)")
         if self.serverThread:
-            self.serverThread.join(timeout=5.0)
             self.serverThread = None
         print("MODBUSINATOR stopped cleanly")
