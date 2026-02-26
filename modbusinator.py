@@ -1,5 +1,5 @@
 # ==============================================
-#  MODBUSINATOR v1.7 - SIMPLE & UNIVERSAL
+#  MODBUSINATOR v1.0
 # ==============================================
 #
 # INPUT FORMAT for .update(inputString):
@@ -9,11 +9,6 @@
 #       '[25.34, 26.1, 27.0]'                   ← 3 parameters
 #       '[{"v":25.34}, {"v":26.1}, {"v":27.0}]' ← also works
 #       '{"v":25.34}'                           ← single dict also works
-#
-# For XLink 500:
-#   Reg Number = (Param - 1) * 2 + 1
-#   Example: Param 1 → Reg 1, Param 100 → Reg 199
-#   Try MSW = Low Reg first, then High Reg
 
 import time
 import json
@@ -41,8 +36,8 @@ class MODBUSINATOR:
     def writeFloat(self, address: int, value: float):
         """Standard Modbus float (MSW first) — works for most devices"""
         floatBytes = struct.pack('>f', float(value))
-        reg1 = int.from_bytes(floatBytes[0:2], 'big')   # MSW
-        reg2 = int.from_bytes(floatBytes[2:4], 'big')   # LSW
+        reg1 = int.from_bytes(floatBytes[0:2], 'big') # MSW
+        reg2 = int.from_bytes(floatBytes[2:4], 'big') # LSW
         self.deviceContext.setValues(3, address, [reg1, reg2])
 
     def update(self, inputString: str):
@@ -53,7 +48,6 @@ class MODBUSINATOR:
         except Exception as e:
             print(f"MODBUSINATOR JSON parse error: {e}")
             return
-
         for i, param in enumerate(paramList[:self.numParams]):
             if isinstance(param, dict):
                 v = param.get("v", 0.0)
@@ -61,7 +55,6 @@ class MODBUSINATOR:
                 v = float(param)
             addr = i * self.registersPerParam
             self.writeFloat(addr, v)
-
         print(f"MODBUSINATOR updated {len(paramList)} parameters at {time.ctime()}")
 
     def runServer(self):
