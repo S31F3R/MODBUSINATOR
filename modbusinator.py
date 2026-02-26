@@ -1,10 +1,10 @@
 # ==============================================
-#  MODBUSINATOR v1.2 - SIMPLE FLOAT VALUES (TCP + SERIAL RTU)
+#  MODBUSINATOR v1.3 - SIMPLE FLOAT VALUES (TCP + SERIAL RTU SIMULTANEOUS)
 # ==============================================
 #
 # PURPOSE: Super-simple Modbus slave. Each parameter = one clean float value.
-#          Works perfectly with XLink 500, any SCADA, PLC, etc.
-#          Zero timestamp, zero complexity.
+#          TCP always runs. Serial runs additionally if comPort is given.
+#          Works with XLink 500, any SCADA, PLC, test tools, etc.
 #
 # INPUT FORMAT for .update(inputString):
 #   JSON string — single value or list of values.
@@ -15,14 +15,14 @@
 #       '{"v":25.34}'                           ← single dict also works
 #
 #   Extra values beyond numParams are ignored.
-#   Default: 256 parameters (each uses 2 registers). Handles 100+ with no issue.
+#   Default: 256 parameters (each uses 2 registers). Handles 100+ easily.
 
 import time
 import json
 import struct
 from threading import Thread
 from pymodbus.server import StartTcpServer, StartSerialServer
-from pymodbus.framer import ModbusRtuFramer
+from pymodbus import FramerType
 from pymodbus.datastore import ModbusSequentialDataBlock, ModbusDeviceContext, ModbusServerContext
 
 class MODBUSINATOR:
@@ -37,7 +37,7 @@ class MODBUSINATOR:
         self.datablock = ModbusSequentialDataBlock(0, [0] * self.totalRegisters)
         self.deviceContext = ModbusDeviceContext(hr=self.datablock)
         self.context = ModbusServerContext(devices=self.deviceContext, single=True)
-        self.serverThread = None
+        self.threads = []   # holds TCP + optional serial threads
 
     def writeFloat(self, address: int, value: float):
         """Writes value as IEEE 754 float (2 registers) — standard for XLink"""
@@ -66,34 +66,37 @@ class MODBUSINATOR:
         print(f"MODBUSINATOR updated {len(paramList)} parameters at {time.ctime()}")
 
     def runServer(self):
-        if self.serverThread and self.serverThread.is_alive():
+        if self.threads:
             print("MODBUSINATOR already running")
             return
 
-        def _startInternal():
-            if self.comPort is None:
-                # TCP mode
-                StartTcpServer(context=self.context, address=(self.host, self.port))
-            else:
-                # Serial RTU mode for XLink 500
+        self.threads = []
+
+        # === TCP SERVER (always runs) ===
+        def _tcpInternal():
+            StartTcpServer(context=self.context, address=(self.host, self.port))
+        tcpThread = Thread(target=_tcpInternal, daemon=True)
+        tcpThread.start()
+        self.threads.append(tcpThread)
+        print(f"MODBUSINATOR TCP listening on {self.host}:{self.port}")
+
+        # === SERIAL SERVER (only if comPort given) ===
+        if self.comPort is not None:
+            def _serialInternal():
                 StartSerialServer(
                     context=self.context,
-                    framer=ModbusRtuFramer,
+                    framer=FramerType.RTU,
                     port=self.comPort,
                     baudrate=self.baudRate,
                     bytesize=8,
                     parity="N",
                     stopbits=1
                 )
-        self.serverThread = Thread(target=_startInternal, daemon=True)
-        self.serverThread.start()
-
-        if self.comPort is None:
-            print(f"MODBUSINATOR listening on TCP {self.host}:{self.port}")
-        else:
-            print(f"MODBUSINATOR listening on SERIAL {self.comPort} @ {self.baudRate} 8N1")
+            serialThread = Thread(target=_serialInternal, daemon=True)
+            serialThread.start()
+            self.threads.append(serialThread)
+            print(f"MODBUSINATOR SERIAL listening on {self.comPort} @ {self.baudRate} 8N1")
 
     def stop(self):
-        print("MODBUSINATOR stopped cleanly")
-        if self.serverThread:
-            self.serverThread = None
+        print("MODBUSINATOR stopped cleanly (daemon threads end automatically)")
+        self.threads = []
