@@ -1,5 +1,5 @@
 # ==============================================
-#  MODBUSINATOR v1.6 - FINAL (Universal + XLink 500)
+#  MODBUSINATOR v1.7 - SIMPLE & UNIVERSAL
 # ==============================================
 #
 # INPUT FORMAT for .update(inputString):
@@ -10,18 +10,10 @@
 #       '[{"v":25.34}, {"v":26.1}, {"v":27.0}]' ← also works
 #       '{"v":25.34}'                           ← single dict also works
 #
-#   Extra values beyond numParams are ignored.
-#
-# XLink 500 SPECIFIC SETTINGS:
-#   wordSwap=True
-#   Reg Number = (Parameter number - 1) * 2 + 1
+# For XLink 500:
+#   Reg Number = (Param - 1) * 2 + 1
 #   Example: Param 1 → Reg 1, Param 100 → Reg 199
-#   MSW = Low Reg
-#
-# For all other devices (Sontek, flowmeters, PLCs, etc.):
-#   wordSwap=False (default)
-#
-# Default: 256 parameters (each uses 2 registers). Handles 1000+ easily.
+#   Try MSW = Low Reg first, then High Reg
 
 import time
 import json
@@ -33,7 +25,7 @@ from pymodbus.datastore import ModbusSequentialDataBlock, ModbusDeviceContext, M
 
 class MODBUSINATOR:
     def __init__(self, numParams=256, registersPerParam=2, port=502, host="0.0.0.0", 
-                 comPort=None, baudRate=19200, wordSwap=False):
+                 comPort=None, baudRate=19200):
         self.numParams = numParams
         self.registersPerParam = registersPerParam
         self.totalRegisters = registersPerParam * numParams + 100
@@ -41,24 +33,16 @@ class MODBUSINATOR:
         self.host = host
         self.comPort = comPort
         self.baudRate = baudRate
-        self.wordSwap = wordSwap
         self.datablock = ModbusSequentialDataBlock(0, [0] * self.totalRegisters)
         self.deviceContext = ModbusDeviceContext(hr=self.datablock)
         self.context = ModbusServerContext(devices=self.deviceContext, single=True)
         self.threads = []
 
     def writeFloat(self, address: int, value: float):
+        """Standard Modbus float (MSW first) — works for most devices"""
         floatBytes = struct.pack('>f', float(value))
-        
-        if self.wordSwap:
-            # XLink 500 wants low word first
-            reg1 = int.from_bytes(floatBytes[2:4], 'big')   # LSW
-            reg2 = int.from_bytes(floatBytes[0:2], 'big')   # MSW
-        else:
-            # Standard Modbus float order (most devices)
-            reg1 = int.from_bytes(floatBytes[0:2], 'big')   # MSW
-            reg2 = int.from_bytes(floatBytes[2:4], 'big')   # LSW
-            
+        reg1 = int.from_bytes(floatBytes[0:2], 'big')   # MSW
+        reg2 = int.from_bytes(floatBytes[2:4], 'big')   # LSW
         self.deviceContext.setValues(3, address, [reg1, reg2])
 
     def update(self, inputString: str):
