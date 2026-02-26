@@ -1,15 +1,27 @@
 # ==============================================
-#  MODBUSINATOR v1.6 - XLINK 500 READY (wordSwap=True)
+#  MODBUSINATOR v1.6 - FINAL (Universal + XLink 500)
 # ==============================================
 #
-# For XLink 500:
-#   Use wordSwap=True
-#   Reg Number = (Param - 1) * 2 + 1
-#   MSW = Low Reg
-#   Example: Param 1 → Reg 1
-#            Param 100 → Reg 199
+# INPUT FORMAT for .update(inputString):
+#   JSON string — single value or list of values.
+#   Examples:
+#       '25.34'                                 ← single parameter
+#       '[25.34, 26.1, 27.0]'                   ← 3 parameters
+#       '[{"v":25.34}, {"v":26.1}, {"v":27.0}]' ← also works
+#       '{"v":25.34}'                           ← single dict also works
 #
-# All other devices usually work with wordSwap=False (default)
+#   Extra values beyond numParams are ignored.
+#
+# XLink 500 SPECIFIC SETTINGS:
+#   wordSwap=True
+#   Reg Number = (Parameter number - 1) * 2 + 1
+#   Example: Param 1 → Reg 1, Param 100 → Reg 199
+#   MSW = Low Reg
+#
+# For all other devices (Sontek, flowmeters, PLCs, etc.):
+#   wordSwap=False (default)
+#
+# Default: 256 parameters (each uses 2 registers). Handles 1000+ easily.
 
 import time
 import json
@@ -36,15 +48,14 @@ class MODBUSINATOR:
         self.threads = []
 
     def writeFloat(self, address: int, value: float):
-        """IEEE 754 float - supports wordSwap for XLink 500"""
-        floatBytes = struct.pack('>f', float(value))   # always big-endian first
+        floatBytes = struct.pack('>f', float(value))
         
         if self.wordSwap:
-            # XLink wants low word first
+            # XLink 500 wants low word first
             reg1 = int.from_bytes(floatBytes[2:4], 'big')   # LSW
             reg2 = int.from_bytes(floatBytes[0:2], 'big')   # MSW
         else:
-            # Normal order
+            # Standard Modbus float order (most devices)
             reg1 = int.from_bytes(floatBytes[0:2], 'big')   # MSW
             reg2 = int.from_bytes(floatBytes[2:4], 'big')   # LSW
             
