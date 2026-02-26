@@ -1,10 +1,11 @@
 import json
 import time
+import struct
 from modbusinator import MODBUSINATOR
 from pymodbus.client import ModbusTcpClient
 
-numParams = 3
-registersPerParam = 32
+numParams = 100
+registersPerParam = 2
 port = 502
 
 # Simulate 1 hour of time-series changes
@@ -21,32 +22,31 @@ for m in range(5):
 def readAndPrintRegisters(client, numParams, registersPerParam, currentMinute):
     print(f"\n=== MODBUSINATOR REGISTERS AFTER MINUTE {currentMinute} ===")
     totalToRead = registersPerParam * numParams
-    result = client.read_holding_registers(0, count=totalToRead)
+    allRegisters = []
+    maxPerRead = 124 # safe limit, never exceeds 125
 
-    if result.isError():
-        print("Read error:", result)
-        return
-    dataBytes = b''.join(reg.to_bytes(2, 'big') for reg in result.registers)
+    for start in range(0, totalToRead, maxPerRead):
+        count = min(maxPerRead, totalToRead - start)
+        result = client.read_holding_registers(0, count=count)
+
+        if result.isError():
+            print("Read error:", result)
+            return
+        allRegisters.extend(result.registers)    
 
     for i in range(numParams):
-        start = i * registersPerParam * 2
-        end = start + registersPerParam * 2
-        rawBytes = dataBytes[start:end]
-        rawString = rawBytes.decode('utf-8', errors='ignore').rstrip('\0').strip()
-
-        if rawString:
-            try:
-                parsed = json.loads(rawString)
-                print(f"Param {i+1:2d} | ts={parsed.get('ts')} | v={parsed.get('v')}")
-            except:
-                print(f"Param {i+1:2d} | (bad JSON) {rawString[:80]}...")
-        else:
-            print(f"Param {i+1:2d} | empty")
+        idx = i * registersPerParam
+        reg1 = allRegisters[idx]
+        reg2 = allRegisters[idx + 1]
+        floatBytes = reg1.to_bytes(2, 'big') + reg2.to_bytes(2, 'big')
+        v = struct.unpack('>f', floatBytes)[0]
+        print(f"Param {i+1:2d} | v={round(v, 2)}")
     print("=" * 50)
 
-mb = MODBUSINATOR(numParams=numParams, registersPerParam=registersPerParam, port=port)
+mb = MODBUSINATOR(numParams=numParams, registersPerParam=registersPerParam, comPort="COM1", baudRate=115200)
+#mb = MODBUSINATOR(numParams=numParams, registersPerParam=registersPerParam)
 mb.runServer()
-time.sleep(3) # let server start
+time.sleep(3) # let both servers start
 client = ModbusTcpClient("127.0.0.1", port=port)
 
 if not client.connect():
@@ -57,7 +57,7 @@ try:
     for idx, snapshot in enumerate(testSnapshots):
         currentMinute = idx * 15
         print(f"\n--- Feeding test snapshot {idx+1}/5 for minute {currentMinute} ---")
-        inputString = json.dumps(snapshot)
+        inputString = json.dumps([p["v"] for p in snapshot])
         mb.update(inputString)
         time.sleep(2) # let registers update
         readAndPrintRegisters(client, numParams, registersPerParam, currentMinute)

@@ -15,7 +15,7 @@
 #       '{"v":25.34}'                           ← single dict also works
 #
 #   Extra values beyond numParams are ignored.
-#   Default: 256 parameters (each uses 2 registers). Handles 100+ easily.
+#   Default: 256 parameters (each uses 2 registers).
 
 import time
 import json
@@ -37,10 +37,10 @@ class MODBUSINATOR:
         self.datablock = ModbusSequentialDataBlock(0, [0] * self.totalRegisters)
         self.deviceContext = ModbusDeviceContext(hr=self.datablock)
         self.context = ModbusServerContext(devices=self.deviceContext, single=True)
-        self.threads = []   # holds TCP + optional serial threads
+        self.threads = [] # holds TCP + optional serial threads
 
     def writeFloat(self, address: int, value: float):
-        """Writes value as IEEE 754 float (2 registers) — standard for XLink"""
+        """Writes value as IEEE 754 float (2 registers)"""
         floatBytes = struct.pack('>f', float(value))
         reg1 = int.from_bytes(floatBytes[0:2], 'big')
         reg2 = int.from_bytes(floatBytes[2:4], 'big')
@@ -69,7 +69,6 @@ class MODBUSINATOR:
         if self.threads:
             print("MODBUSINATOR already running")
             return
-
         self.threads = []
 
         # === TCP SERVER (always runs) ===
