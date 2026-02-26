@@ -19,8 +19,7 @@ from pymodbus import FramerType
 from pymodbus.datastore import ModbusSequentialDataBlock, ModbusDeviceContext, ModbusServerContext
 
 class MODBUSINATOR:
-    def __init__(self, numParams=256, registersPerParam=2, port=502, host="0.0.0.0", 
-                 comPort=None, baudRate=19200):
+    def __init__(self, numParams=256, registersPerParam=2, port=502, host="0.0.0.0", comPort=None, baudRate=9600):
         self.numParams = numParams
         self.registersPerParam = registersPerParam
         self.totalRegisters = registersPerParam * numParams + 100
@@ -43,6 +42,7 @@ class MODBUSINATOR:
     def update(self, inputString: str):
         try:
             paramList = json.loads(inputString)
+            
             if not isinstance(paramList, list):
                 paramList = [paramList]
         except Exception as e:
