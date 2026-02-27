@@ -23,7 +23,7 @@ def readAndPrintRegisters(client, numParams, registersPerParam, currentMinute):
     print(f"\n=== MODBUSINATOR REGISTERS AFTER MINUTE {currentMinute} ===")
     totalToRead = registersPerParam * numParams
     allRegisters = []
-    maxPerRead = 124   # safe limit
+    maxPerRead = 124 # safe limit
 
     for start in range(0, totalToRead, maxPerRead):
         count = min(maxPerRead, totalToRead - start)
