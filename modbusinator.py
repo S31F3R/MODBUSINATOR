@@ -19,7 +19,7 @@ from pymodbus import FramerType
 from pymodbus.datastore import ModbusSequentialDataBlock, ModbusDeviceContext, ModbusServerContext
 
 class MODBUSINATOR:
-    def __init__(self, numParams=256, registersPerParam=2, port=502, host="0.0.0.0", comPort=None, baudRate=9600):
+    def __init__(self, numParams=256, registersPerParam=2, port=502, host="0.0.0.0", comPort=None, baudRate=9600, unitID=10):
         self.numParams = numParams
         self.registersPerParam = registersPerParam
         self.totalRegisters = registersPerParam * numParams + 100
@@ -27,9 +27,10 @@ class MODBUSINATOR:
         self.host = host
         self.comPort = comPort
         self.baudRate = baudRate
+        self.unitID = unitID
         self.datablock = ModbusSequentialDataBlock(0, [0] * self.totalRegisters)
         self.deviceContext = ModbusDeviceContext(hr=self.datablock)
-        self.context = ModbusServerContext(devices=self.deviceContext, single=True)
+        self.context = ModbusServerContext(devices={self.unitID: self.deviceContext}, single=False)
         self.threads = []
 
     def writeFloat(self, address: int, value: float):
@@ -68,13 +69,13 @@ class MODBUSINATOR:
         t1 = Thread(target=_tcp, daemon=True)
         t1.start()
         self.threads.append(t1)
-        print(f"MODBUSINATOR TCP listening on {self.host}:{self.port}")
+        print(f"MODBUSINATOR TCP listening on {self.host}:{self.port} (Unit ID {self.unitID})")
 
         if self.comPort:
             def _serial():
                 StartSerialServer(
                     context=self.context,
-                    framer=FramerType.RTU,
+                    framer=FramerType.RTU, # FramerType.ASCII is another option but for older devices
                     port=self.comPort,
                     baudrate=self.baudRate,
                     bytesize=8,
@@ -84,7 +85,7 @@ class MODBUSINATOR:
             t2 = Thread(target=_serial, daemon=True)
             t2.start()
             self.threads.append(t2)
-            print(f"MODBUSINATOR SERIAL listening on {self.comPort} @ {self.baudRate} 8E1")
+            print(f"MODBUSINATOR SERIAL listening on {self.comPort} @ {self.baudRate} 8E1 (Unit ID {self.unitID})")
 
     def stop(self):
         print("MODBUSINATOR stopped cleanly")
