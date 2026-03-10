@@ -22,7 +22,7 @@ def main():
     parser.add_argument("--host", default="localhost", help="TCP host (default: localhost)")
     parser.add_argument("--port", type=int, default=502, help="TCP port (default: 502)")
     parser.add_argument("--com", default=None, help="Serial COM port e.g. COM3 or /dev/ttyUSB0")
-    parser.add_argument("--baud", type=int, default=19200, help="Serial baudrate (default: 19200)")
+    parser.add_argument("--baud", type=int, default=9600, help="Serial baudrate (default: 9600)")
     parser.add_argument("--maxAddr", type=int, default=1024, help="Maximum address to scan")
     parser.add_argument("--chunk", type=int, default=100, help="Registers per read request (max \~125 on most devices)")
     parser.add_argument("--decodeFloats", action="store_true", help="Also decode every 2 registers as float")
