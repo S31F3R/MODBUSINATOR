@@ -2,7 +2,6 @@ import json
 import time
 import struct
 from modbusinator import MODBUSINATOR
-from pymodbus.client import ModbusTcpClient
 
 numParams = 100
 registersPerParam = 2
@@ -47,12 +46,7 @@ mb = MODBUSINATOR(numParams=numParams, registersPerParam=registersPerParam, comP
 #mb = MODBUSINATOR(numParams=numParams, registersPerParam=registersPerParam)
 mb.runServer()
 time.sleep(3) # let both servers start
-client = ModbusTcpClient("127.0.0.1", port=port)
 
-if not client.connect():
-    print("Client could not connect")
-    mb.stop()
-    exit()
 try:
     for idx, snapshot in enumerate(testSnapshots):
         currentMinute = idx * 15
@@ -60,11 +54,9 @@ try:
         inputString = json.dumps([p["v"] for p in snapshot])
         mb.update(inputString)
         time.sleep(2) # let registers update
-        readAndPrintRegisters(client, numParams, registersPerParam, currentMinute)
         time.sleep(60)
 except KeyboardInterrupt:
     print("\nTest interrupted by user")
 finally:
-    client.close()
     mb.stop()
     print("\n test finished. MODBUSINATOR stopped." )
