@@ -5,7 +5,7 @@
 # Usage examples:
 #   python modbusDUMPER.py --help
 #   python modbusDUMPER.py --port 5020 --connection TCP --register HR
-#   python modbusDUMPER.py --port 5025 --connection SERIAL --comPort COM1
+#   python modbusDUMPER.py --port 5020 --connection SERIAL --comPort COM1
 
 import argparse
 import struct
@@ -16,23 +16,24 @@ from pymodbus.exceptions import ModbusIOException
 # ====================== ARGUMENT PARSER ======================
 parser = argparse.ArgumentParser(description="MODBUSDUMPER - Modbus Scanner & Insight Tool")
 parser.add_argument("--port", type=int, default=5020, help="TCP port (default 5020)")
-parser.add_argument("--connection", choices=["TCP", "SERIAL"], default="TCP", help="Connection type")
+parser.add_argument("--connection", choices=["TCP", "SERIAL"], type=str.upper, default="TCP", help="Connection type")
 parser.add_argument("--comPort", default="COM1", help="COM port (used only with SERIAL)")
 parser.add_argument("--baud", type=int, default=9600, help="Baud rate")
-parser.add_argument("--parity", choices=["N", "E", "O"], default="E", help="Parity (N=None, E=Even, O=Odd)")
+parser.add_argument("--parity", choices=["N", "E", "O"], type=str.upper, default="E", help="Parity (N=None, E=Even, O=Odd)")
 parser.add_argument("--stopbits", type=int, choices=[1,2], default=1, help="Stop bits")
 parser.add_argument("--bytesize", type=int, default=8, help="Byte size")
-parser.add_argument("--framer", choices=["RTU", "ASCII"], default="RTU", help="Framer type")
-parser.add_argument("--register", choices=["HR", "IR"], default="HR", help="Register type")
+parser.add_argument("--framer", choices=["RTU", "ASCII"], type=str.upper, default="RTU", help="Framer type")
+parser.add_argument("--register", choices=["HR", "IR"], type=str.upper, default="HR", help="Register type")
 parser.add_argument("--unitID", type=int, default=1, help="Unit / Slave ID")
 parser.add_argument("--startParam", type=int, default=1, help="First parameter to scan")
 parser.add_argument("--numParams", type=int, default=0, help="Number of parameters to scan (0 = scan ALL)")
+parser.add_argument("--host", default="127.0.0.1", help="IP address of the Modbus server (default 127.0.0.1 for localhost)")
 args = parser.parse_args()
 
 # ====================== SETUP =====================
 if args.connection.upper() == "TCP":
-    client = ModbusTcpClient("127.0.0.1", port=args.port)
-    connDesc = f"TCP 127.0.0.1:{args.port} (Unit ID {args.unitID})"
+    client = ModbusTcpClient(args.host, port=args.port)
+    connDesc = f"TCP {args.host}:{args.port} (Unit ID {args.unitID})"
 else:
     client = ModbusSerialClient(
         port=args.comPort,
@@ -58,8 +59,6 @@ print(f"\n=== MODBUSDUMPER STARTED ===")
 print(f"Connection     : {connDesc}")
 print(f"Register Type  : {regName}")
 print(f"Scanning       : Param {args.startParam} → {args.startParam + numToScan - 1}\n")
-print(f"{'Raw:':>8} | {'Modicon:':>12} | Value")
-print("-" * 60)
 
 # ====================== SCAN =====================
 for p in range(args.startParam, args.startParam + numToScan):
