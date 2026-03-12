@@ -16,7 +16,7 @@
 #
 # numParams=256              # How many parameters to support
 # registersPerParam=2        # 2 = Float (recommended)
-# port=502                   # TCP port
+# port=5020                  # TCP port
 # host="0.0.0.0"
 # comPort=None               # None = TCP only (recommended default)
 # baudRate=9600
@@ -36,7 +36,7 @@ from pymodbus import FramerType
 from pymodbus.datastore import ModbusSequentialDataBlock, ModbusDeviceContext, ModbusServerContext
 
 class MODBUSINATOR:
-    def __init__(self, numParams=256, registersPerParam=2, port=502, host="0.0.0.0",
+    def __init__(self, numParams=256, registersPerParam=2, port=5020, host="0.0.0.0",
                  comPort=None, baudRate=9600, unitID=1,
                  bytesize=8, parity="E", stopbits=1, framerType=FramerType.RTU,
                  registerType="HR"):
