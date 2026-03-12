@@ -101,10 +101,14 @@ class MODBUSINATOR:
             print("Serial already running")
             return
         self.comPort = comPort
+
+        # Convert framerType.RTU (or ASCII) to 'rtu' or 'ascii'
+        framerStr = str(self.framerType).lower().split('.')[-1]
+        
         def _serial():
             StartSerialServer(
                 context=self.context,
-                framer=self.framerType,
+                framer=framerStr,
                 port=comPort,
                 baudrate=self.baudRate,
                 bytesize=self.bytesize,
