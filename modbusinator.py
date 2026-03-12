@@ -10,6 +10,23 @@
 #       '[{"v":25.34}, {"v":26.1}, {"v":27.0}]' ← also works
 #       '{"v":25.34}'                           ← single dict also works
 
+# ==============================================
+#  CONFIGURATION OPTIONS (passed to __init__)
+# ==============================================
+#
+# numParams=256              # How many parameters to support
+# registersPerParam=2        # 2 = Float (recommended)
+# port=502                   # TCP port
+# host="0.0.0.0"
+# comPort=None               # None = TCP only (recommended default)
+# baudRate=9600
+# unitID=1
+# bytesize=8
+# parity="E"                 # "N", "E", "O"
+# stopbits=1
+# framerType=FramerType.RTU  # FramerType.ASCII for very old devices
+# registerType="HR"          # "HR" or "IR" (case-insensitive)
+
 import time
 import json
 import struct
@@ -19,7 +36,10 @@ from pymodbus import FramerType
 from pymodbus.datastore import ModbusSequentialDataBlock, ModbusDeviceContext, ModbusServerContext
 
 class MODBUSINATOR:
-    def __init__(self, numParams=256, registersPerParam=2, port=502, host="0.0.0.0", comPort=None, baudRate=9600, unitID=1):
+    def __init__(self, numParams=256, registersPerParam=2, port=502, host="0.0.0.0",
+                 comPort=None, baudRate=9600, unitID=1,
+                 bytesize=8, parity="E", stopbits=1, framerType=FramerType.RTU,
+                 registerType="HR"):
         self.numParams = numParams
         self.registersPerParam = registersPerParam
         self.totalRegisters = registersPerParam * numParams + 100
@@ -28,22 +48,27 @@ class MODBUSINATOR:
         self.comPort = comPort
         self.baudRate = baudRate
         self.unitID = unitID
+        self.bytesize = bytesize
+        self.parity = parity
+        self.stopbits = stopbits
+        self.framerType = framerType
+        self.registerType = registerType.upper() # normalize to HR/IR
         self.datablock = ModbusSequentialDataBlock(0, [0] * self.totalRegisters)
-        self.deviceContext = ModbusDeviceContext(hr=self.datablock)
+        self.deviceContext = ModbusDeviceContext(**{self.registerType.lower(): self.datablock})
         self.context = ModbusServerContext(devices={self.unitID: self.deviceContext}, single=False)
         self.threads = []
+        self.serialThread = None
 
     def writeFloat(self, address: int, value: float):
-        """Standard Modbus float (MSW first) — works for most devices"""
         floatBytes = struct.pack('>f', float(value))
-        reg1 = int.from_bytes(floatBytes[0:2], 'big') # MSW
-        reg2 = int.from_bytes(floatBytes[2:4], 'big') # LSW
-        self.deviceContext.setValues(3, address, [reg1, reg2])
+        reg1 = int.from_bytes(floatBytes[0:2], 'big')
+        reg2 = int.from_bytes(floatBytes[2:4], 'big')
+        funcCode = 4 if self.registerType == "IR" else 3
+        self.deviceContext.setValues(funcCode, address, [reg1, reg2])
 
     def update(self, inputString: str):
         try:
             paramList = json.loads(inputString)
-            
             if not isinstance(paramList, list):
                 paramList = [paramList]
         except Exception as e:
@@ -71,22 +96,33 @@ class MODBUSINATOR:
         self.threads.append(t1)
         print(f"MODBUSINATOR TCP listening on {self.host}:{self.port} (Unit ID {self.unitID})")
 
-        if self.comPort:
-            def _serial():
-                StartSerialServer(
-                    context=self.context,
-                    framer=FramerType.RTU, # FramerType.ASCII is another option but for older devices
-                    port=self.comPort,
-                    baudrate=self.baudRate,
-                    bytesize=8,
-                    parity="E",
-                    stopbits=1
-                )
-            t2 = Thread(target=_serial, daemon=True)
-            t2.start()
-            self.threads.append(t2)
-            print(f"MODBUSINATOR SERIAL listening on {self.comPort} @ {self.baudRate} 8E1 (Unit ID {self.unitID})")
+    def startSerial(self, comPort: str):
+        if self.serialThread and self.serialThread.is_alive():
+            print("Serial already running")
+            return
+        self.comPort = comPort
+        def _serial():
+            StartSerialServer(
+                context=self.context,
+                framer=self.framerType,
+                port=comPort,
+                baudrate=self.baudRate,
+                bytesize=self.bytesize,
+                parity=self.parity,
+                stopbits=self.stopbits
+            )
+        self.serialThread = Thread(target=_serial, daemon=True)
+        self.serialThread.start()
+        regName = "Input Registers" if self.registerType == "IR" else "Holding Registers"
+        print(f"MODBUSINATOR SERIAL listening on {comPort} @ {self.baudRate} {self.bytesize}{self.parity}{self.stopbits} ({regName}, Unit ID {self.unitID})")
+
+    def stopSerial(self):
+        if self.serialThread:
+            print(f"MODBUSINATOR SERIAL stopped on {self.comPort}")
+            self.serialThread = None
+            self.comPort = None
 
     def stop(self):
         print("MODBUSINATOR stopped cleanly")
+        self.stopSerial()
         self.threads = []
