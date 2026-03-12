@@ -6,10 +6,10 @@ from modbusinator import MODBUSINATOR
 from pymodbus.client import ModbusTcpClient
 
 # ================== TESTER CONFIG ==================
-numParams          = 100
+numParams          = 10
 registersPerParam  = 2
 port               = 5020
-comPort            = None            # None = TCP only (recommended for testing)
+comPort            = "COM1"          # None = TCP only (no serial). Set to "COM1" (using correct COM#) to auto-start serial
 baudRate           = 9600
 unitID             = 1
 bytesize           = 8
@@ -38,8 +38,9 @@ mb = MODBUSINATOR(
 
 mb.runServer()
 time.sleep(3)
-
+if comPort is not None: mb.startSerial(comPort)
 client = ModbusTcpClient("127.0.0.1", port=port)
+
 if not client.connect():
     print("Client could not connect")
     mb.stop()
@@ -78,7 +79,6 @@ def readAndPrintRegisters(client, numParams, registersPerParam, currentTs):
         floatBytes = reg1.to_bytes(2, 'big') + reg2.to_bytes(2, 'big')
         v = struct.unpack('>f', floatBytes)[0]
         print(f"Raw:{rawAddr:4d} | Modicon:{modiconAddr:5d} | v={round(v, 2):6.2f}")
-
     print("=" * 50)
 
 # ====================== MAIN LOOP =====================
@@ -92,8 +92,6 @@ try:
         inputString = json.dumps(snapshot)
         mb.update(inputString)
         readAndPrintRegisters(client, numParams, registersPerParam, currentTs)
-        param100Reg = ((numParams - 1) * registersPerParam) + 1
-        print(f">>> FORCE REG {param100Reg} NOW — should show exactly {snapshot[-1]} (Param 100) <<<")
 
         if runMinutes != "INF":
             elapsedMinutes = (time.time() - startTime) / 60
