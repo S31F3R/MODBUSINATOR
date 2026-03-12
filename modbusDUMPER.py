@@ -50,7 +50,7 @@ print(f"\n=== MODBUSDUMPER STARTED ===")
 print(f"Connection : {connDesc}")
 print(f"Register Type : {regName}")
 print(f"Scanning params {startParam} to {startParam + numParamsToScan - 1}\n")
-print(f"{'Param':>5} | {'Raw Addr':>8} | {'Modicon Addr':>12} | Value")
+print(f"{'Raw Addr':>8} | {'Modicon Addr':>12} | Value")
 print("-" * 55)
 
 # ====================== SCAN =====================
