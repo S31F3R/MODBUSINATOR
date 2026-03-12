@@ -5,7 +5,7 @@
 # Usage examples:
 #   python modbusDUMPER.py --help
 #   python modbusDUMPER.py --port 5020 --connection TCP --register HR
-#   python modbusDUMPER.py --port 5020 --connection SERIAL --comPort COM1
+#   python modbusDUMPER.py --connection SERIAL --comPort COM1
 
 import argparse
 import struct
