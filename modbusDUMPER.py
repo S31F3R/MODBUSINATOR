@@ -4,6 +4,7 @@
 
 import json
 import time
+import struct
 from pymodbus.client import ModbusTcpClient, ModbusSerialClient
 from pymodbus import FramerType
 
@@ -26,8 +27,8 @@ numParamsToScan = 50            # how many parameters to dump (or set to 0 for a
 
 # ====================== SETUP =====================
 if connectionType.upper() == "TCP":
-    client = ModbusTcpClient("127.0.0.1", port=5025)
-    connDesc = f"TCP 127.0.0.1:5025 (Unit ID {unitID})"
+    client = ModbusTcpClient("127.0.0.1", port=5020)
+    connDesc = f"TCP 127.0.0.1:5020 (Unit ID {unitID})"
 else:
     client = ModbusSerialClient(
         port=comPort,
