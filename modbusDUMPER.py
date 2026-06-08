@@ -1,99 +1,84 @@
 # ==============================================
-#  modbusDUMPER v1.0
-#  Scans and dumps ALL holding registers from any Modbus server
-#  Stops automatically when the device returns an error
+#  MODBUSDUMPER.PY - Modbus Scanner / Insight Tool
 # ==============================================
+#
+# Usage examples:
+#   python modbusDUMPER.py --help
+#   python modbusDUMPER.py --port 5020 --connection TCP --register HR
+#   python modbusDUMPER.py --connection SERIAL --comPort COM1
 
 import argparse
 import struct
 from pymodbus.client import ModbusTcpClient, ModbusSerialClient
 from pymodbus import FramerType
+from pymodbus.exceptions import ModbusIOException
 
-def regsToFloat(msw: int, lsw: int) -> float | None:
-    """Decode two registers (MSW-first, big-endian) → IEEE 754 float"""
+# ====================== ARGUMENT PARSER ======================
+parser = argparse.ArgumentParser(description="MODBUSDUMPER - Modbus Scanner & Insight Tool")
+parser.add_argument("--port", type=int, default=5020, help="TCP port (default 5020)")
+parser.add_argument("--connection", choices=["TCP", "SERIAL"], type=str.upper, default="TCP", help="Connection type")
+parser.add_argument("--comPort", default="COM1", help="COM port (used only with SERIAL)")
+parser.add_argument("--baud", type=int, default=9600, help="Baud rate")
+parser.add_argument("--parity", choices=["N", "E", "O"], type=str.upper, default="E", help="Parity (N=None, E=Even, O=Odd)")
+parser.add_argument("--stopbits", type=int, choices=[1,2], default=1, help="Stop bits")
+parser.add_argument("--bytesize", type=int, default=8, help="Byte size")
+parser.add_argument("--framer", choices=["RTU", "ASCII"], type=str.upper, default="RTU", help="Framer type")
+parser.add_argument("--register", choices=["HR", "IR"], type=str.upper, default="HR", help="Register type")
+parser.add_argument("--unitID", type=int, default=1, help="Unit / Slave ID")
+parser.add_argument("--startParam", type=int, default=1, help="First parameter to scan")
+parser.add_argument("--numParams", type=int, default=0, help="Number of parameters to scan (0 = scan ALL)")
+parser.add_argument("--host", default="127.0.0.1", help="IP address of the Modbus server (default 127.0.0.1 for localhost)")
+args = parser.parse_args()
+
+# ====================== SETUP =====================
+if args.connection.upper() == "TCP":
+    client = ModbusTcpClient(args.host, port=args.port)
+    connDesc = f"TCP {args.host}:{args.port} (Unit ID {args.unitID})"
+else:
+    client = ModbusSerialClient(
+        port=args.comPort,
+        baudrate=args.baud,
+        parity=args.parity,
+        stopbits=args.stopbits,
+        bytesize=args.bytesize,
+        framer=getattr(FramerType, args.framer)
+    )
+
+    connDesc = f"SERIAL {args.comPort} @ {args.baud} 8{args.parity}{args.stopbits} (Unit ID {args.unitID})"
+if not client.connect():
+    print("Failed to connect to Modbus device")
+    exit()
+regName = "Input Registers" if args.register.upper() == "IR" else "Holding Registers"
+modiconBase = 30001 if args.register.upper() == "IR" else 40001
+readFunc = client.read_input_registers if args.register.upper() == "IR" else client.read_holding_registers
+
+# If user passes 0, scan ALL (up to 256)
+numToScan = args.numParams if args.numParams > 0 else 256
+
+print(f"\n=== MODBUSDUMPER STARTED ===")
+print(f"Connection     : {connDesc}")
+print(f"Register Type  : {regName}")
+print(f"Scanning       : Param {args.startParam} → {args.startParam + numToScan - 1}\n")
+
+# ====================== SCAN =====================
+for p in range(args.startParam, args.startParam + numToScan):
+    rawAddr = (p - 1) * 2
+    modiconAddr = modiconBase + rawAddr
+
     try:
-        return struct.unpack('>f', struct.pack('>HH', msw, lsw))[0]
-    except:
-        return None
+        result = readFunc(rawAddr, count=2)
 
-def main():
-    parser = argparse.ArgumentParser(description="modbusDUMPER - dump all available holding registers")
-    parser.add_argument("--mode", choices=["tcp", "serial"], default="tcp", help="tcp or serial (default: tcp)")
-    parser.add_argument("--host", default="localhost", help="TCP host (default: localhost)")
-    parser.add_argument("--port", type=int, default=502, help="TCP port (default: 502)")
-    parser.add_argument("--com", default=None, help="Serial COM port e.g. COM3 or /dev/ttyUSB0")
-    parser.add_argument("--baud", type=int, default=9600, help="Serial baudrate (default: 9600)")
-    parser.add_argument("--maxAddr", type=int, default=1024, help="Maximum address to scan")
-    parser.add_argument("--chunk", type=int, default=100, help="Registers per read request (max \~125 on most devices)")
-    parser.add_argument("--decodeFloats", action="store_true", help="Also decode every 2 registers as float")
-    parser.add_argument("--unit", type=int, default=1, help="Modbus unit/slave ID (default 1)")
-    args = parser.parse_args()
-
-    if args.mode == "serial" and not args.com:
-        print("ERROR: --com is required when using --mode serial")
-        return
-
-    # === Create client ===
-    if args.mode == "tcp":
-        client = ModbusTcpClient(args.host, port=args.port, timeout=3)
-        print(f"Connecting TCP → {args.host}:{args.port} (unit {args.unit})")
-    else:
-        client = ModbusSerialClient(
-            port=args.com,
-            baudrate=args.baud,
-            bytesize=8,
-            parity="E",
-            stopbits=1,
-            timeout=3,
-            framer=FramerType.RTU
-        )
-        print(f"Connecting Serial → {args.com} @ {args.baud} 8E1 (unit {args.unit})")
-    if not client.connect():
-        print("Failed to connect to the Modbus server!")
-        return
-    print("Connected. Scanning holding registers from 0...\n")
-
-    registers = {}
-    addr = 0
-    lastGood = -1
-
-    while addr <= args.maxAddr:
-        count = min(args.chunk, args.maxAddr - addr + 1)
-
-        try:
-            result = client.read_holding_registers(address=addr, count=count, device_id=args.unit)
-
-            if result.isError():
-                print(f"Server returned error at address {addr} → stopping scan.")
-                break
-            for i, value in enumerate(result.registers):
-                regAddr = addr + i
-                registers[regAddr] = value
-                print(f"HR {regAddr:05d} :  {value:6d}  (0x{value:04X})")
-            lastGood = addr + count - 1
-        except Exception as e:
-            print(f"Exception at address {addr}: {e}")
-            break
-        addr += count
-    client.close()
-    print(f"\n=== Scan finished ===")
-    dumpedMsg = f"Dumped {len(registers)} holding registers"
-
-    if lastGood >= 0:
-        dumpedMsg += f" (0–{lastGood})"
-    print(dumpedMsg)
-
-    if args.decodeFloats and lastGood >= 1:
-        print("\n=== Decoded Floats ===")
-
-        for i in range(0, lastGood, 2):
-            msw = registers.get(i)
-            lsw = registers.get(i + 1)
-
-            if msw is not None and lsw is not None:
-                fval = regsToFloat(msw, lsw)
-                if fval is not None:
-                    print(f"Float {i:05d}-{i+1:05d} :  {fval:.6f}   (HR{i} + HR{i+1})")
-
-if __name__ == "__main__":
-    main()
+        if result.isError():
+            print(f"{rawAddr:8d} | {modiconAddr:12d} | READ ERROR")
+            continue
+        reg1 = result.registers[0]
+        reg2 = result.registers[1]
+        floatBytes = reg1.to_bytes(2, 'big') + reg2.to_bytes(2, 'big')
+        v = struct.unpack('>f', floatBytes)[0]
+        print(f"Raw:{rawAddr:8d} | Modicon:{modiconAddr:12d} | v={v:8.2f}")
+    except ModbusIOException:
+        print(f"Raw:{rawAddr:8d} | Modicon:{modiconAddr:12d} | NO RESPONSE")
+    except Exception as e:
+        print(f"Raw:{rawAddr:8d} | Modicon:{modiconAddr:12d} | ERROR: {e}")
+print("\nScan complete.")
+client.close()

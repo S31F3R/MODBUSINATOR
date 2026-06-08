@@ -100,10 +100,10 @@ def getServiceClass():
                     pythonExe = sys.executable
                     servicemanager.LogWarningMsg(".venv python.exe not found, using current interpreter as fallback.")
 
-                logDir = os.path.join(baseDir, "logs")
+                logDir = baseDir
                 if not os.path.exists(logDir):
                     os.makedirs(logDir)
-                logPath = os.path.join(logDir, cfg.get("name", "service") + ".log")
+                logPath = os.path.join(logDir, "serviceWrapper.log")
 
                 self.ReportServiceStatus(win32service.SERVICE_RUNNING)
 
