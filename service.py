@@ -21,7 +21,10 @@ def loadServiceConfig():
         "displayName": "Default Service"
     }
 
-def ensurePywin32():
+def checkPywin32():
+    """Check if pywin32 is available. We no longer auto-install it.
+    User should install it once (preferably in system Python) and run --install with that Python.
+    """
     try:
         import win32serviceutil
         import win32service
@@ -29,24 +32,7 @@ def ensurePywin32():
         import servicemanager
         return True
     except ImportError:
-        print("pywin32 not found in current Python environment. Installing...")
-        try:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "pip", "--quiet"])
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "pywin32", "--quiet"])
-            print("pywin32 installed successfully.")
-            scriptsDir = os.path.join(os.path.dirname(sys.executable), "Scripts")
-            postScript = os.path.join(scriptsDir, "pywin32_postinstall.py")
-            if os.path.exists(postScript):
-                print("Running pywin32 post-install (this may take a moment)...")
-                subprocess.check_call([sys.executable, postScript, "-install", "-silent"])
-            print("pywin32 setup complete. You may need to re-run this command if import still fails.")
-            return True
-        except subprocess.CalledProcessError as e:
-            print(f"Automatic install failed: {e}")
-            print("Please manually install in your .venv:")
-            print("  .venv\\Scripts\\python.exe -m pip install pywin32")
-            print("  Then run: .venv\\Scripts\\pywin32_postinstall.py -install (elevated if prompted)")
-            return False
+        return False
 
 def getServiceClass():
     import win32serviceutil
@@ -78,6 +64,8 @@ def getServiceClass():
                 servicemanager.PYS_SERVICE_STARTED,
                 (self._svc_name_, "")
             )
+            # Report RUNNING immediately so SCM doesn't kill us with 1053 timeout
+            self.ReportServiceStatus(win32service.SERVICE_RUNNING)
             self.main()
 
         def main(self):
@@ -100,16 +88,12 @@ def getServiceClass():
                     pythonExe = sys.executable
                     servicemanager.LogWarningMsg(".venv python.exe not found, using current interpreter as fallback.")
 
-                logDir = baseDir
-                if not os.path.exists(logDir):
-                    os.makedirs(logDir)
-                logPath = os.path.join(logDir, "serviceWrapper.log")
-
-                self.ReportServiceStatus(win32service.SERVICE_RUNNING)
+                # Wrapper-specific log directly in program root (clearly separated from your program's own logging)
+                logPath = os.path.join(baseDir, "serviceWrapper.log")
 
                 with open(logPath, "a", encoding="utf-8") as logFile:
-                    logFile.write(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] === Service starting ===\n")
-                    logFile.write(f"Launching: {targetScript} using {pythonExe}\n")
+                    logFile.write(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] === Service wrapper starting ===\n")
+                    logFile.write(f"Launching child: {targetScript} using {pythonExe}\n")
 
                     creationFlags = 0
                     if os.name == "nt":
@@ -191,17 +175,35 @@ if __name__ == "__main__":
         parser = argparse.ArgumentParser(
             description="Universal Windows Service wrapper. Place in program root next to .venv and your main .py"
         )
-        parser.add_argument("--name", type=str, default=None, help="Service name (internal, no spaces recommended)")
+        parser.add_argument("--install", action="store_true", help="Install/register the Windows service (requires --name and --script)")
+        parser.add_argument("--name", type=str, default=None, help="Service name - only needed during --install")
         parser.add_argument("--description", type=str, default="Python program running as Windows service")
         parser.add_argument("--script", dest="targetScript", type=str, default=None, help="Main .py filename to execute (e.g. main.py)")
-        parser.add_argument("--displayName", dest="displayName", type=str, default=None, help="Friendly display name")
-        parser.add_argument("--start", action="store_true", help="Start the service (requires --name or config)")
-        parser.add_argument("--stop", action="store_true", help="Stop the service (requires --name or config)")
-        parser.add_argument("--remove", action="store_true", help="Remove/uninstall the service (requires --name or config)")
+        parser.add_argument("--displayName", dest="displayName", type=str, default=None, help="Friendly display name (optional, only for install)")
+        parser.add_argument("--start", action="store_true", help="Start the service")
+        parser.add_argument("--stop", action="store_true", help="Stop the service")
+        parser.add_argument("--remove", action="store_true", help="Remove/uninstall the service and delete local config")
 
         args = parser.parse_args()
 
-        if args.targetScript and args.name:
+        if args.install:
+            if not (args.name and args.targetScript):
+                print("ERROR: --install requires both --name and --script")
+                print("Example: .venv\\Scripts\\python.exe service.py --install --name MyService --script main.py")
+                sys.exit(1)
+
+            if not checkPywin32():
+                print("\n=== pywin32 is not available in the current Python ===")
+                print("For best results, install pywin32 ONCE into your system Python (as Administrator):")
+                print("   python -m pip install pywin32")
+                print("   python Scripts\\pywin32_postinstall.py -install")
+                print("\nThen run the --install command using that same system Python,")
+                print("or add the system Python's Scripts folder to PATH and re-run.")
+                print("\nAlternative (per-project):")
+                print("   .venv\\Scripts\\python.exe -m pip install pywin32")
+                print("   .venv\\Scripts\\python.exe .venv\\Scripts\\pywin32_postinstall.py -install")
+                sys.exit(1)
+
             # INSTALL / SETUP
             configData = {
                 "name": args.name,
@@ -233,13 +235,14 @@ if __name__ == "__main__":
                 print(f"\nService '{args.name}' installed successfully!")
                 print("To start: sc start " + args.name)
                 print("Or: python service.py start")
-                print("Logs will appear in ./logs/ next to this script.")
+                print("Wrapper debug output (child stdout/stderr) goes to ./serviceWrapper.log (in this folder)")
             except Exception as ex:
                 print(f"InstallService failed: {ex}")
-                print("Tip: If service already exists, run with --remove first (using same --name).")
+                print("Tip: If a service with this name already exists, run 'python service.py --remove' first.")
 
-        elif args.start and (args.name or True):
-            serviceName = args.name or loadServiceConfig().get("name")
+        elif args.start:
+            cfg = loadServiceConfig()
+            serviceName = cfg.get("name")
             if serviceName:
                 try:
                     win32serviceutil = __import__("win32serviceutil")
@@ -248,10 +251,11 @@ if __name__ == "__main__":
                 except Exception as ex:
                     print(f"Start failed: {ex}")
             else:
-                print("No service name provided or in config.")
+                print("No serviceConfig.json found. Did you run --install first?")
 
-        elif args.stop and (args.name or True):
-            serviceName = args.name or loadServiceConfig().get("name")
+        elif args.stop:
+            cfg = loadServiceConfig()
+            serviceName = cfg.get("name")
             if serviceName:
                 try:
                     win32serviceutil = __import__("win32serviceutil")
@@ -260,32 +264,37 @@ if __name__ == "__main__":
                 except Exception as ex:
                     print(f"Stop failed: {ex}")
             else:
-                print("No service name provided or in config.")
+                print("No serviceConfig.json found. Did you run --install first?")
 
-        elif args.remove and (args.name or True):
-            serviceName = args.name or loadServiceConfig().get("name")
+        elif args.remove:
+            cfg = loadServiceConfig()
+            serviceName = cfg.get("name")
             if serviceName:
                 try:
                     win32serviceutil = __import__("win32serviceutil")
                     win32serviceutil.RemoveService(serviceName)
-                    print(f"Service '{serviceName}' removed.")
+                    print(f"Service '{serviceName}' removed from Windows.")
                     configPath = os.path.join(os.path.dirname(os.path.abspath(__file__)), "serviceConfig.json")
                     if os.path.exists(configPath):
                         os.remove(configPath)
-                        print("Local config file also deleted.")
+                        print("Local serviceConfig.json also deleted.")
                 except Exception as ex:
                     print(f"Remove failed: {ex}")
             else:
-                print("No service name provided or in config.")
+                print("No serviceConfig.json found (nothing to remove).")
 
         else:
-            print("Usage for install:")
-            print("  .venv\\Scripts\\python.exe service.py --name MyService --script main.py --description \"Does cool stuff\"")
-            print("\nAfter install, manage with:")
+            print("Install a new service (recommended: install pywin32 once globally first):")
+            print("  python -m pip install pywin32          # run once as Administrator")
+            print("  python Scripts\\pywin32_postinstall.py -install")
+            print()
+            print("  Then for each program:")
+            print("  .venv\\Scripts\\python.exe service.py --install --name MyService --script main.py")
+            print("\nAfter install, manage with (no --name needed):")
             print("  python service.py start")
             print("  python service.py stop")
             print("  python service.py remove")
-            print("  (or add --name MyService to any of the above)")
+            print("\nTip: To re-install after changes, first run 'python service.py --remove'")
 
     else:
         # Standard path: python service.py start | stop | debug | install (after config exists)
