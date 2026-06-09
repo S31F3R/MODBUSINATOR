@@ -75,7 +75,7 @@ for p in range(args.startParam, args.startParam + numToScan):
         reg2 = result.registers[1]
         floatBytes = reg1.to_bytes(2, 'big') + reg2.to_bytes(2, 'big')
         v = struct.unpack('>f', floatBytes)[0]
-        print(f"Raw:{rawAddr:8d} | Modicon:{modiconAddr:12d} | v={v:8.2f}")
+        print(f"Raw:{rawAddr:8d} | Modicon:{modiconAddr:12d} | v=    {v:8.2f}")
     except ModbusIOException:
         print(f"Raw:{rawAddr:8d} | Modicon:{modiconAddr:12d} | NO RESPONSE")
     except Exception as e:
