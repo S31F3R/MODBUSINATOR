@@ -1,5 +1,5 @@
 # ==============================================
-#  MODBUSINATOR v1.0
+#  MODBUSINATOR
 # ==============================================
 #
 # INPUT FORMAT for .update(inputString):
@@ -34,6 +34,10 @@ from threading import Thread
 from pymodbus.server import StartTcpServer, StartSerialServer
 from pymodbus import FramerType
 from pymodbus.datastore import ModbusSequentialDataBlock, ModbusDeviceContext, ModbusServerContext
+from logic import initLogging, logMessage
+
+# Enable logging
+initLogging()
 
 class MODBUSINATOR:
     def __init__(self, numParams=256, registersPerParam=2, port=5020, host="0.0.0.0",
@@ -72,20 +76,39 @@ class MODBUSINATOR:
             if not isinstance(paramList, list):
                 paramList = [paramList]
         except Exception as e:
-            print(f"MODBUSINATOR JSON parse error: {e}")
+            logMessage('ERROR', f"MODBUSINATOR JSON parse error: {e}")
             return
-        for i, param in enumerate(paramList[:self.numParams]):
+        writes = 0
+        limit = min(len(paramList), self.numParams)
+
+        for i in range(limit):
+            param = paramList[i]
+
+            # Normalize value for both list and dict forms
             if isinstance(param, dict):
-                v = param.get("v", 0.0)
+                raw = param.get("v", None)
             else:
-                v = float(param)
+                raw = param
+
+            # Treat "", whitespace-only strings, or None as blank → skip write
+            if raw is None or (isinstance(raw, str) and raw.strip() == ""):
+                continue
+
+            # Convert to float safely; if conversion fails, skip this position
+            try:
+                val = float(raw)
+            except (TypeError, ValueError):
+                continue
+
+            # Address: zero-based; two 16-bit registers per 32-bit float
             addr = i * self.registersPerParam
-            self.writeFloat(addr, v)
-        print(f"MODBUSINATOR updated {len(paramList)} parameters at {time.ctime()}")
+            self.writeFloat(addr, val)
+            writes += 1
+        logMessage('INFO', f"MODBUSINATOR updated {writes} parameters at {time.ctime()}")
 
     def runServer(self):
         if self.threads:
-            print("MODBUSINATOR already running")
+            logMessage('INFO', "MODBUSINATOR already running")
             return
         self.threads = []
 
@@ -94,13 +117,12 @@ class MODBUSINATOR:
         t1 = Thread(target=_tcp, daemon=True)
         t1.start()
         self.threads.append(t1)
-        print(f"MODBUSINATOR TCP listening on {self.host}:{self.port} (Unit ID {self.unitID})")
+        logMessage('INFO', f"MODBUSINATOR TCP listening on {self.host}:{self.port} (Unit ID {self.unitID})")
 
-    def startSerial(self, comPort: str):
+    def startSerial(self):
         if self.serialThread and self.serialThread.is_alive():
-            print("Serial already running")
-            return
-        self.comPort = comPort
+            logMessage('INFO', "Serial already running")
+            return        
 
         # Convert framerType.RTU (or ASCII) to 'rtu' or 'ascii'
         framerStr = str(self.framerType).lower().split('.')[-1]
@@ -109,7 +131,7 @@ class MODBUSINATOR:
             StartSerialServer(
                 context=self.context,
                 framer=framerStr,
-                port=comPort,
+                port=self.comPort,
                 baudrate=self.baudRate,
                 bytesize=self.bytesize,
                 parity=self.parity,
@@ -118,15 +140,15 @@ class MODBUSINATOR:
         self.serialThread = Thread(target=_serial, daemon=True)
         self.serialThread.start()
         regName = "Input Registers" if self.registerType == "IR" else "Holding Registers"
-        print(f"MODBUSINATOR SERIAL listening on {comPort} @ {self.baudRate} {self.bytesize}{self.parity}{self.stopbits} ({regName}, Unit ID {self.unitID})")
+        logMessage('INFO', f"MODBUSINATOR SERIAL listening on {self.comPort} @ {self.baudRate} {self.bytesize}{self.parity}{self.stopbits} ({regName}, Unit ID {self.unitID})")
 
     def stopSerial(self):
         if self.serialThread:
-            print(f"MODBUSINATOR SERIAL stopped on {self.comPort}")
+            logMessage('INFO', f"MODBUSINATOR SERIAL stopped on {self.comPort}")
             self.serialThread = None
             self.comPort = None
 
     def stop(self):
-        print("MODBUSINATOR stopped cleanly")
+        logMessage('INFO', "MODBUSINATOR stopped cleanly")
         self.stopSerial()
         self.threads = []
