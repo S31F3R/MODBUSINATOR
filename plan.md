@@ -6,20 +6,19 @@ Get both tools onto a single, current pymodbus (3.9.x) with clean, consistent AP
 ---
 
 ## 0. Pin a target version first
-- Decide on one version for both tools. Recommend the latest 3.9.x.
-- `pip install "pymodbus==3.9.*"` (adjust once you confirm the exact release).
-- Record it: `pip freeze | grep pymodbus` → add to `requirements.txt`.
-- The two tools are currently written against *different* API generations
-  (MODBUSINATOR uses the new `ModbusDeviceContext`/`devices=`; DUMPER uses
-  older client patterns). Unifying the version is what removes the "newer
-  versions break my code" problem.
+- CONFIRMED: currently running **pymodbus 3.12.1**. Target this — do not downgrade.
+- Pin it: add `pymodbus==3.12.1` to `requirements.txt`.
+- The "newer versions broke my code" issue was almost certainly the DUMPER
+  *client* calls (`slave=`, positional `count`), NOT the server. MODBUSINATOR
+  already uses the modern `ModbusDeviceContext`/`devices=` API and is fine on 3.12.
+  Fix is to bring DUMPER forward to match, not to hold anything back.
 
 ---
 
-## 1. API changes to expect across pymodbus 3.x → 3.9
+## 1. API changes to expect across pymodbus 3.x → 3.12
 These are the renames/signature changes most likely to have broken you:
 
-| Area | Old | New (3.9) |
+| Area | Old | New (3.12) |
 |------|-----|-----------|
 | Slave/device context | `ModbusSlaveContext` | `ModbusDeviceContext` |
 | Server context kwarg | `ModbusServerContext(slaves={...})` | `ModbusServerContext(devices={...})` |
@@ -27,8 +26,12 @@ These are the renames/signature changes most likely to have broken you:
 | Framer import | `from pymodbus.transaction import ModbusRtuFramer` | `from pymodbus import FramerType` |
 | `count` on reads | positional allowed | keyword-only (`count=`) |
 
-MODBUSINATOR already uses the new context names, so it is closer to 3.9.
+MODBUSINATOR already uses the new context names, so it needs no version work.
 DUMPER is the one that needs the client-side updates.
+
+NOTE: verify the exact `device_id=` keyword against your installed 3.12.1
+(`python -c "help(ModbusTcpClient.read_holding_registers)"`) before committing —
+the arg name settled during 3.7/3.8 but confirm it on your build rather than trust this table.
 
 ---
 
