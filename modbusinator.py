@@ -1,5 +1,5 @@
 # ==============================================
-#  MODBUSINATOR
+#  MODBUSINATOR v1.0
 # ==============================================
 #
 # INPUT FORMAT for .update(inputString):
