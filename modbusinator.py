@@ -27,6 +27,10 @@
 # stopbits=1
 # framerType=FramerType.RTU  # FramerType.ASCII for very old devices
 # registerType="HR"          # "HR" or "IR" (case-insensitive)
+# appName="MODBUSINATOR"     # logger name; pass the host app name when embedded
+#                            # e.g. appName="SCADA Data Link"
+#                            # If omitted, uses the name from initLogging() when the
+#                            # host already called it, otherwise "MODBUSINATOR".
 
 import asyncio
 import time
@@ -37,14 +41,12 @@ from threading import Event, Thread
 from pymodbus import FramerType
 from pymodbus.server import ModbusTcpServer, ModbusSerialServer
 from pymodbus.datastore import ModbusSequentialDataBlock, ModbusDeviceContext, ModbusServerContext
+import logic
 from logic import initLogging, logMessage
 
-# Enable logging
-initLogging()
+floatRegisters = 2  # IEEE-754 float is always two 16-bit registers (ABCD)
 
-FLOAT_REGISTERS = 2  # IEEE-754 float is always two 16-bit registers (ABCD)
-
-def _asFramerType(framerType):
+def asFramerType(framerType):
     if isinstance(framerType, FramerType):
         return framerType
     if isinstance(framerType, str):
@@ -59,10 +61,18 @@ class MODBUSINATOR:
     def __init__(self, numParams=256, registersPerParam=2, port=5020, host="0.0.0.0",
                  comPort=None, baudRate=9600, unitID=1,
                  bytesize=8, parity="E", stopbits=1, framerType=FramerType.RTU,
-                 registerType="HR"):
-        if registersPerParam < FLOAT_REGISTERS:
-            logMessage('WARN', f"registersPerParam={registersPerParam} is too small for FLOAT32; using {FLOAT_REGISTERS}")
-            registersPerParam = FLOAT_REGISTERS
+                 registerType="HR", appName=None):
+        if appName:
+            initLogging(appName=appName)
+            self.appName = appName
+        elif logic.loggingInitialized:
+            self.appName = logic.loggerName
+        else:
+            initLogging(appName='MODBUSINATOR')
+            self.appName = 'MODBUSINATOR'
+        if registersPerParam < floatRegisters:
+            self.log('WARN', f"registersPerParam={registersPerParam} is too small for FLOAT32; using {floatRegisters}")
+            registersPerParam = floatRegisters
         self.numParams = numParams
         self.registersPerParam = registersPerParam
         self.totalRegisters = registersPerParam * numParams + 100
@@ -74,7 +84,7 @@ class MODBUSINATOR:
         self.bytesize = bytesize
         self.parity = parity
         self.stopbits = stopbits
-        self.framerType = _asFramerType(framerType)
+        self.framerType = asFramerType(framerType)
         self.registerType = registerType.upper()
         if self.registerType not in ("HR", "IR"):
             raise ValueError(f"registerType must be 'HR' or 'IR', got {registerType!r}")
@@ -89,7 +99,10 @@ class MODBUSINATOR:
         self.serialReady = Event()
         self.threads = []
 
-    def _registerBankName(self):
+    def log(self, level, message):
+        logMessage(level, message, appName=self.appName)
+
+    def registerBankName(self):
         return "Input Registers" if self.registerType == "IR" else "Holding Registers"
 
     def writeFloat(self, address: int, value: float):
@@ -108,7 +121,7 @@ class MODBUSINATOR:
             if not isinstance(paramList, list):
                 paramList = [paramList]
         except Exception as e:
-            logMessage('ERROR', f"MODBUSINATOR JSON parse error: {e}")
+            self.log('ERROR', f"MODBUSINATOR JSON parse error: {e}")
             return
         writes = 0
         limit = min(len(paramList), self.numParams)
@@ -135,9 +148,9 @@ class MODBUSINATOR:
             addr = i * self.registersPerParam
             self.writeFloat(addr, val)
             writes += 1
-        logMessage('INFO', f"MODBUSINATOR updated {writes} parameters at {time.ctime()}")
+        self.log('INFO', f"MODBUSINATOR updated {writes} parameters at {time.ctime()}")
 
-    def _shutdownServer(self, server, thread, name):
+    def shutdownServer(self, server, thread, name):
         if server is not None:
             try:
                 loop = server.loop
@@ -145,19 +158,19 @@ class MODBUSINATOR:
                     future = asyncio.run_coroutine_threadsafe(server.shutdown(), loop)
                     future.result(timeout=5)
             except Exception as e:
-                logMessage('ERROR', f"MODBUSINATOR {name} shutdown error: {e}")
+                self.log('ERROR', f"MODBUSINATOR {name} shutdown error: {e}")
         if thread is not None and thread.is_alive():
             thread.join(timeout=5)
 
     def runServer(self):
         if self.tcpThread and self.tcpThread.is_alive():
-            logMessage('INFO', "MODBUSINATOR already running")
+            self.log('INFO', "MODBUSINATOR already running")
             return
 
         self.tcpReady.clear()
 
-        def _tcp():
-            async def _run():
+        def runTcp():
+            async def serve():
                 server = ModbusTcpServer(
                     self.context,
                     address=(self.host, self.port),
@@ -170,41 +183,41 @@ class MODBUSINATOR:
                     await server.serving
 
             try:
-                asyncio.run(_run())
+                asyncio.run(serve())
             except Exception as e:
-                logMessage('ERROR', f"MODBUSINATOR TCP server error: {e}")
+                self.log('ERROR', f"MODBUSINATOR TCP server error: {e}")
             finally:
                 self.tcpReady.set()
 
-        self.tcpThread = Thread(target=_tcp, daemon=True, name="modbusinator-tcp")
+        self.tcpThread = Thread(target=runTcp, daemon=True, name="modbusinator-tcp")
         self.tcpThread.start()
         if not self.tcpReady.wait(timeout=5) or self.tcpServer is None or not self.tcpThread.is_alive():
-            logMessage('ERROR', f"MODBUSINATOR TCP failed to start on {self.host}:{self.port}")
+            self.log('ERROR', f"MODBUSINATOR TCP failed to start on {self.host}:{self.port}")
             self.tcpServer = None
             self.tcpThread = None
             return
         self.threads = [self.tcpThread]
-        logMessage(
+        self.log(
             'INFO',
             f"MODBUSINATOR TCP listening on {self.host}:{self.port} "
-            f"({self._registerBankName()}, Unit ID {self.unitID})"
+            f"({self.registerBankName()}, Unit ID {self.unitID})"
         )
 
     def startSerial(self, comPort=None):
         if comPort is not None:
             self.comPort = comPort
         if not self.comPort:
-            logMessage('ERROR', "MODBUSINATOR SERIAL start requested with no COM port")
+            self.log('ERROR', "MODBUSINATOR SERIAL start requested with no COM port")
             return
         if self.serialThread and self.serialThread.is_alive():
-            logMessage('INFO', "Serial already running")
+            self.log('INFO', "Serial already running")
             return
 
         port = self.comPort
         self.serialReady.clear()
 
-        def _serial():
-            async def _run():
+        def runSerial():
+            async def serve():
                 server = ModbusSerialServer(
                     self.context,
                     framer=self.framerType,
@@ -222,26 +235,26 @@ class MODBUSINATOR:
                     await server.serving
 
             try:
-                asyncio.run(_run())
+                asyncio.run(serve())
             except Exception as e:
-                logMessage('ERROR', f"MODBUSINATOR SERIAL server error: {e}")
+                self.log('ERROR', f"MODBUSINATOR SERIAL server error: {e}")
             finally:
                 self.serialReady.set()
 
-        self.serialThread = Thread(target=_serial, daemon=True, name="modbusinator-serial")
+        self.serialThread = Thread(target=runSerial, daemon=True, name="modbusinator-serial")
         self.serialThread.start()
         if not self.serialReady.wait(timeout=5) or self.serialServer is None or not self.serialThread.is_alive():
-            logMessage('ERROR', f"MODBUSINATOR SERIAL failed to start on {port}")
+            self.log('ERROR', f"MODBUSINATOR SERIAL failed to start on {port}")
             self.serialServer = None
             self.serialThread = None
             return
         if self.serialThread not in self.threads:
             self.threads.append(self.serialThread)
-        logMessage(
+        self.log(
             'INFO',
             f"MODBUSINATOR SERIAL listening on {self.comPort} @ {self.baudRate} "
             f"{self.bytesize}{self.parity}{self.stopbits} "
-            f"({self._registerBankName()}, Unit ID {self.unitID})"
+            f"({self.registerBankName()}, Unit ID {self.unitID})"
         )
 
     def stopSerial(self):
@@ -250,16 +263,16 @@ class MODBUSINATOR:
         self.serialThread = None
         if server is None and thread is None:
             return
-        self._shutdownServer(server, thread, "SERIAL")
+        self.shutdownServer(server, thread, "SERIAL")
         if thread in self.threads:
             self.threads.remove(thread)
-        logMessage('INFO', f"MODBUSINATOR SERIAL stopped on {port}")
+        self.log('INFO', f"MODBUSINATOR SERIAL stopped on {port}")
 
     def stop(self):
         self.stopSerial()
         server, thread = self.tcpServer, self.tcpThread
         self.tcpServer = None
         self.tcpThread = None
-        self._shutdownServer(server, thread, "TCP")
+        self.shutdownServer(server, thread, "TCP")
         self.threads = []
-        logMessage('INFO', "MODBUSINATOR stopped cleanly")
+        self.log('INFO', "MODBUSINATOR stopped cleanly")

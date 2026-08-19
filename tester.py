@@ -17,6 +17,7 @@ parity             = "E"
 stopbits           = 1
 framerType         = "RTU"           # "RTU" or "ASCII" (serial only)
 registerType       = "HR"            # "HR" or "IR"
+appName            = "MODBUSINATOR"  # logger name; host apps pass their own (e.g. "SCADA Data Link")
 runMinutes         = "INF"           # number of minutes OR "INF" for infinite
 intervalSeconds    = 60              # update interval in seconds
 # =================================================
@@ -33,7 +34,8 @@ mb = MODBUSINATOR(
     parity=parity,
     stopbits=stopbits,
     framerType=framerType,
-    registerType=registerType
+    registerType=registerType,
+    appName=appName
 )
 
 mb.runServer()

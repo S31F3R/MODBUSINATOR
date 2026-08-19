@@ -5,7 +5,7 @@ from logging.handlers import RotatingFileHandler
 loggingInitialized = False
 loggerName = 'MODBUSINATOR'
 
-def _logDir(appName):
+def logDirectory(appName):
     """Service-safe log directory: ProgramData on Windows, XDG state on POSIX."""
     if os.name == 'nt':
         base = os.environ.get("PROGRAMDATA") or os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
@@ -15,28 +15,26 @@ def _logDir(appName):
 
 def initLogging(appName='MODBUSINATOR', debugMode=False):
     """
-    Initializes logging exactly once.
+    Set the active logger name and attach handlers if that logger has none.
+    Safe to call from a host app (e.g. appName='SCADA Data Link') before or
+    after importing MODBUSINATOR — already-configured loggers are left intact.
     - Logs to %PROGRAMDATA%/<appName>/logs/app.log (Windows)
       or $XDG_STATE_HOME/<appName>/logs/app.log (POSIX)
     - File logging always DEBUG
     - Console logging DEBUG if debugMode=True, else WARNING
-    - Handlers added only once (safe to import from any module)
     """
     global loggingInitialized, loggerName
 
-    if loggingInitialized:
-        return
-
     loggerName = appName
-    logDir = _logDir(appName)
-    os.makedirs(logDir, exist_ok=True)
-    logPath = os.path.join(logDir, "app.log")
-
     logger = logging.getLogger(appName)
     logger.setLevel(logging.DEBUG)
     logger.propagate = False
 
     if not logger.handlers:
+        logDir = logDirectory(appName)
+        os.makedirs(logDir, exist_ok=True)
+        logPath = os.path.join(logDir, "app.log")
+
         consoleHandler = logging.StreamHandler()
         consoleLevel = logging.DEBUG if debugMode else logging.WARNING
         consoleHandler.setLevel(consoleLevel)
@@ -56,14 +54,16 @@ def initLogging(appName='MODBUSINATOR', debugMode=False):
         logger.addHandler(fileHandler)
     loggingInitialized = True
 
-def logMessage(level, message):
+def logMessage(level, message, appName=None):
     """
     Log a message at a specified level.
     Accepted levels: DEBUG, INFO, WARN, ERROR, CRITICAL
+    appName selects the logger; omit it to use the name from the last initLogging().
     """
-    if not loggingInitialized:
-        initLogging()
-    logger = logging.getLogger(loggerName)
+    name = appName or loggerName
+    if not logging.getLogger(name).handlers:
+        initLogging(appName=name)
+    logger = logging.getLogger(name)
     lvl = level.upper()
 
     if lvl == 'DEBUG':
