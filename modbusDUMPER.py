@@ -24,7 +24,8 @@ parser.add_argument("--baud", type=int, default=9600, help="Baud rate")
 parser.add_argument("--parity", choices=["N", "E", "O"], type=str.upper, default="E", help="Parity (N=None, E=Even, O=Odd)")
 parser.add_argument("--stopbits", type=int, choices=[1,2], default=1, help="Stop bits")
 parser.add_argument("--bytesize", type=int, default=8, help="Byte size")
-parser.add_argument("--framer", choices=["RTU", "ASCII"], type=str.upper, default="RTU", help="Framer type")
+parser.add_argument("--framer", choices=["RTU", "ASCII", "SOCKET"], type=str.upper, default=None,
+                    help="Framer type (default SOCKET for TCP, RTU for SERIAL). Use RTU for RTU-over-TCP tunnels.")
 parser.add_argument("--register", choices=["HR", "IR"], type=str.upper, default="HR", help="Register type")
 parser.add_argument("--dataType", choices=["INT16", "UINT16", "INT32", "UINT32", "FLOAT32"], type=str.upper, default="FLOAT32", help="Data type to decode (default FLOAT32)")
 parser.add_argument("--byteOrder", choices=["ABCD", "CDAB", "BADC", "DCBA"], type=str.upper, default="ABCD", help="Byte/word order for 32-bit types (default ABCD). Ignored for 16-bit types")
@@ -77,9 +78,13 @@ def decodeValue(registers):
         return struct.unpack('>f', orderedBytes)[0]
 
 # ====================== SETUP =====================
+if args.framer is None:
+    args.framer = "RTU" if args.connection.upper() == "SERIAL" else "SOCKET"
+framer = getattr(FramerType, args.framer)
+
 if args.connection.upper() == "TCP":
-    client = ModbusTcpClient(args.host, port=args.port)
-    connDesc = f"TCP {args.host}:{args.port} (Unit ID {args.unitID})"
+    client = ModbusTcpClient(args.host, port=args.port, framer=framer)
+    connDesc = f"TCP {args.host}:{args.port} framer={args.framer} (Unit ID {args.unitID})"
 else:
     client = ModbusSerialClient(
         port=args.comPort,
@@ -87,10 +92,10 @@ else:
         parity=args.parity,
         stopbits=args.stopbits,
         bytesize=args.bytesize,
-        framer=getattr(FramerType, args.framer)
+        framer=framer
     )
 
-    connDesc = f"SERIAL {args.comPort} @ {args.baud} 8{args.parity}{args.stopbits} (Unit ID {args.unitID})"
+    connDesc = f"SERIAL {args.comPort} @ {args.baud} {args.bytesize}{args.parity}{args.stopbits} framer={args.framer} (Unit ID {args.unitID})"
 if not client.connect():
     print("Failed to connect to Modbus device")
     exit()
@@ -116,7 +121,7 @@ for p in range(args.startParam, args.startParam + numToScan):
     modiconAddr = modiconBase + rawAddr
 
     try:
-        result = readFunc(rawAddr, count=regCount)
+        result = readFunc(rawAddr, count=regCount, device_id=args.unitID)
 
         if result.isError():
             print(f"Raw:{rawAddr:8d} | Modicon:{modiconAddr:12d} | READ ERROR")

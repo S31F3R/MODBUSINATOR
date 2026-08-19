@@ -3,38 +3,40 @@ import os
 from logging.handlers import RotatingFileHandler
 
 loggingInitialized = False
+loggerName = 'MODBUSINATOR'
+
+def _logDir(appName):
+    """Service-safe log directory: ProgramData on Windows, XDG state on POSIX."""
+    if os.name == 'nt':
+        base = os.environ.get("PROGRAMDATA") or os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+        return os.path.join(base, appName, "logs")
+    stateHome = os.environ.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"), ".local", "state")
+    return os.path.join(stateHome, appName, "logs")
 
 def initLogging(appName='MODBUSINATOR', debugMode=False):
     """
     Initializes logging exactly once.
-    - Logs to %LOCALAPPDATA%/<appName>/logs/app.log
+    - Logs to %PROGRAMDATA%/<appName>/logs/app.log (Windows)
+      or $XDG_STATE_HOME/<appName>/logs/app.log (POSIX)
     - File logging always DEBUG
     - Console logging DEBUG if debugMode=True, else WARNING
     - Handlers added only once (safe to import from any module)
     """
-    global loggingInitialized
+    global loggingInitialized, loggerName
 
     if loggingInitialized:
         return
 
-    # Use ProgramData for service-safe logging
-    programData = os.environ.get("PROGRAMDATA", r"C:\ProgramData")
-
-    # Build log directory
-    logDir = os.path.join(programData, appName, "logs")
+    loggerName = appName
+    logDir = _logDir(appName)
     os.makedirs(logDir, exist_ok=True)
-
-    # Full path to log file
     logPath = os.path.join(logDir, "app.log")
 
-    # Create logger
     logger = logging.getLogger(appName)
     logger.setLevel(logging.DEBUG)
     logger.propagate = False
 
-    # Prevent double addition of handlers
     if not logger.handlers:
-        # Console Handler
         consoleHandler = logging.StreamHandler()
         consoleLevel = logging.DEBUG if debugMode else logging.WARNING
         consoleHandler.setLevel(consoleLevel)
@@ -42,7 +44,6 @@ def initLogging(appName='MODBUSINATOR', debugMode=False):
         consoleHandler.setFormatter(consoleFormatter)
         logger.addHandler(consoleHandler)
 
-        # File Handler (rotating)
         fileHandler = RotatingFileHandler(
             logPath,
             maxBytes=1048576,
@@ -62,7 +63,7 @@ def logMessage(level, message):
     """
     if not loggingInitialized:
         initLogging()
-    logger = logging.getLogger('SCADA Data Link')
+    logger = logging.getLogger(loggerName)
     lvl = level.upper()
 
     if lvl == 'DEBUG':

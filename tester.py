@@ -9,13 +9,13 @@ from pymodbus.client import ModbusTcpClient
 numParams          = 10
 registersPerParam  = 2
 port               = 5020
-comPort            = "COM1"          # None = TCP only (no serial). Set to "COM1" (using correct COM#) to auto-start serial
+comPort            = None            # None = TCP only (no serial). Set to "COM1" (using correct COM#) to auto-start serial
 baudRate           = 9600
 unitID             = 1
 bytesize           = 8
 parity             = "E"
 stopbits           = 1
-framerType         = "RTU"           # "RTU" or "ASCII"
+framerType         = "RTU"           # "RTU" or "ASCII" (serial only)
 registerType       = "HR"            # "HR" or "IR"
 runMinutes         = "INF"           # number of minutes OR "INF" for infinite
 intervalSeconds    = 60              # update interval in seconds
@@ -60,7 +60,7 @@ def readAndPrintRegisters(client, numParams, registersPerParam, currentTs):
 
     for start in range(0, totalToRead, maxPerRead):
         count = min(maxPerRead, totalToRead - start)
-        result = readFunc(start, count=count)
+        result = readFunc(start, count=count, device_id=unitID)
 
         if result.isError():
             print("Read error:", result)
